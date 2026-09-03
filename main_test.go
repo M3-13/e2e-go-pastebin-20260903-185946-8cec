@@ -38,8 +38,12 @@ func TestPasteRoutesAreWired(t *testing.T) {
 	srv := httptest.NewServer(newRouter(store))
 	defer srv.Close()
 
-	// The paste routes are declared and reachable (not 404), even while their
-	// handlers are stubs implemented by later tickets.
+	// The paste routes are declared and reachable. Every registered handler
+	// answers with a JSON body (writeJSON/writeError), whereas an unregistered
+	// route falls through to ServeMux's default text/plain 404. So a JSON
+	// Content-Type proves the route is wired, regardless of the status code a
+	// given handler returns (a stub answers 501, a real handler may answer 404
+	// for an unknown id).
 	for _, tc := range []struct {
 		method string
 		path   string
@@ -55,8 +59,8 @@ func TestPasteRoutesAreWired(t *testing.T) {
 			t.Fatalf("%s %s failed: %v", tc.method, tc.path, err)
 		}
 		resp.Body.Close()
-		if resp.StatusCode == http.StatusNotFound {
-			t.Fatalf("%s %s returned 404, route is not registered", tc.method, tc.path)
+		if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+			t.Fatalf("%s %s is not wired: got Content-Type %q", tc.method, tc.path, ct)
 		}
 	}
 }
