@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,6 +22,27 @@ func deleteRequest(t *testing.T, url string) *http.Response {
 	return resp
 }
 
+func assertErrorJSON(t *testing.T, resp *http.Response, status int) {
+	t.Helper()
+	if resp.StatusCode != status {
+		t.Fatalf("expected status %d, got %d", status, resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("expected application/json content-type, got %q", ct)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read body: %v", err)
+	}
+	var decoded map[string]string
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("invalid JSON body %q: %v", body, err)
+	}
+	if decoded["error"] == "" {
+		t.Fatalf("expected non-empty error message, got %q", body)
+	}
+}
+
 func TestDeleteHandlerExistingReturns204(t *testing.T) {
 	store := NewStore()
 	p, _ := store.Create("hello", "text", time.Hour)
@@ -30,6 +53,13 @@ func TestDeleteHandlerExistingReturns204(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read body: %v", err)
+	}
+	if len(body) != 0 {
+		t.Fatalf("expected empty body, got %q", body)
 	}
 }
 
@@ -47,9 +77,7 @@ func TestDeleteHandlerSecondDeleteReturns404(t *testing.T) {
 
 	resp = deleteRequest(t, srv.URL+"/pastes/"+p.ID)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("second delete: expected 404, got %d", resp.StatusCode)
-	}
+	assertErrorJSON(t, resp, http.StatusNotFound)
 }
 
 func TestDeleteHandlerUnknownReturns404(t *testing.T) {
@@ -59,9 +87,7 @@ func TestDeleteHandlerUnknownReturns404(t *testing.T) {
 
 	resp := deleteRequest(t, srv.URL+"/pastes/does-not-exist")
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", resp.StatusCode)
-	}
+	assertErrorJSON(t, resp, http.StatusNotFound)
 }
 
 func TestDeleteHandlerExpiredReturns404(t *testing.T) {
@@ -74,7 +100,5 @@ func TestDeleteHandlerExpiredReturns404(t *testing.T) {
 
 	resp := deleteRequest(t, srv.URL+"/pastes/"+p.ID)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404 for expired paste, got %d", resp.StatusCode)
-	}
+	assertErrorJSON(t, resp, http.StatusNotFound)
 }

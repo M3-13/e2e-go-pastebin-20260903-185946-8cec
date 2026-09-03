@@ -38,8 +38,11 @@ func TestPasteRoutesAreWired(t *testing.T) {
 	srv := httptest.NewServer(newRouter(store))
 	defer srv.Close()
 
-	// The paste routes are declared and reachable (not 404), even while their
-	// handlers are stubs implemented by later tickets.
+	// The paste routes are declared and reachable. A registered route always
+	// answers through its handler, whose errors are JSON ({"error": ...}) even
+	// when it legitimately answers 404 (e.g. an unknown id). An unregistered
+	// route falls through to the mux's plain-text 404, so a non-JSON 404 is
+	// what proves a route is missing.
 	for _, tc := range []struct {
 		method string
 		path   string
@@ -54,9 +57,10 @@ func TestPasteRoutesAreWired(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s %s failed: %v", tc.method, tc.path, err)
 		}
+		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if resp.StatusCode == http.StatusNotFound {
-			t.Fatalf("%s %s returned 404, route is not registered", tc.method, tc.path)
+		if resp.StatusCode == http.StatusNotFound && resp.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("%s %s returned a plain 404 (route not registered): %q", tc.method, tc.path, body)
 		}
 	}
 }
